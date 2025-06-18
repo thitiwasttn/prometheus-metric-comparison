@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>เครื่องมือเปรียบเทียบ Metric ของ Prometheus</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Sarabun', sans-serif;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800 p-4 sm:p-6 md:p-8">
+
+    <div class="max-w-7xl mx-auto bg-white rounded-xl shadow-lg p-6">
+
+        <!-- Header -->
+        <header class="text-center mb-6 border-b pb-4">
+            <h1 class="text-2xl sm:text-3xl font-bold text-gray-700">เครื่องมือเปรียบเทียบ Metric ของ Prometheus</h1>
+            <p class="text-gray-500 mt-2">วางข้อมูลจากไฟล์ Prometheus เพื่อเปรียบเทียบและดูรายการเมตริกทั้งหมด</p>
+        </header>
+
+        <!-- Input Textareas -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+            <div>
+                <label for="beforeData" class="block text-lg font-semibold mb-2 text-gray-600">ข้อมูลก่อนอัปเกรด (เช่น Java 8)</label>
+                <textarea id="beforeData" rows="15" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-200" placeholder="วางข้อมูลจากไฟล์ Prometheus ชุดแรกที่นี่..."></textarea>
+            </div>
+            <div>
+                <label for="afterData" class="block text-lg font-semibold mb-2 text-gray-600">ข้อมูลหลังอัปเกรด (เช่น Java 17)</label>
+                <textarea id="afterData" rows="15" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition duration-200" placeholder="วางข้อมูลจากไฟล์ Prometheus ชุดที่สองที่นี่..."></textarea>
+            </div>
+        </div>
+
+        <!-- Compare Button -->
+        <div class="text-center mb-8">
+            <button id="compareBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-lg shadow-md hover:shadow-lg transform hover:-translate-y-0.5 transition-all duration-300">
+                เปรียบเทียบ Metric
+            </button>
+        </div>
+
+        <!-- Results Section -->
+        <div id="results" class="flex flex-col gap-8 hidden">
+
+            <!-- Full Lists -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- All metrics in Before -->
+                <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <h2 class="text-xl font-bold text-blue-700 mb-3">เมตริกทั้งหมด (เวอร์ชันเก่า)</h2>
+                    <ul id="allBeforeList" class="list-disc list-inside space-y-1 text-blue-900 overflow-y-auto" style="max-height: 500px;"></ul>
+                </div>
+                 <!-- All metrics in After -->
+                <div class="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
+                    <h2 class="text-xl font-bold text-indigo-700 mb-3">เมตริกทั้งหมด (เวอร์ชันใหม่)</h2>
+                    <ul id="allAfterList" class="list-disc list-inside space-y-1 text-indigo-900 overflow-y-auto" style="max-height: 500px;"></ul>
+                </div>
+            </div>
+            <!-- Divider -->
+            <div class="border-t border-gray-200"></div>
+            <!-- Comparison Results -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                 <!-- Metrics only in Before -->
+                <div class="bg-red-50 border border-red-200 rounded-lg p-4">
+                    <h2 class="text-xl font-bold text-red-700 mb-3">มีเฉพาะในเวอร์ชันเก่า</h2>
+                    <ul id="onlyInBeforeList" class="list-disc list-inside space-y-1 text-red-900 overflow-y-auto" style="max-height: 400px;"></ul>
+                </div>
+                <!-- Metrics only in After -->
+                <div class="bg-green-50 border border-green-200 rounded-lg p-4">
+                    <h2 class="text-xl font-bold text-green-700 mb-3">มีเฉพาะในเวอร์ชันใหม่</h2>
+                    <ul id="onlyInAfterList" class="list-disc list-inside space-y-1 text-green-900 overflow-y-auto" style="max-height: 400px;"></ul>
+                </div>
+                <!-- Common Metrics -->
+                <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                    <h2 class="text-xl font-bold text-gray-700 mb-3">มีอยู่ทั้งสองเวอร์ชัน</h2>
+                    <ul id="commonMetricsList" class="list-disc list-inside space-y-1 text-gray-900 overflow-y-auto" style="max-height: 400px;"></ul>
+                </div>
+            </div>
+            
+             
+        </div>
+         <div id="loading" class="text-center text-gray-500 hidden mt-4">กำลังประมวลผล...</div>
+         <div id="noDataMessage" class="text-center text-red-500 hidden mt-4">กรุณาใส่ข้อมูลทั้งสองช่องเพื่อเปรียบเทียบ</div>
+    </div>
+
+    <script>
+        // Function to parse Prometheus data and extract unique metric names
+        function getMetricNames(data) {
+            if (!data) return new Set();
+            
+            const lines = data.split('\n');
+            const metricNames = new Set();
+            
+            lines.forEach(line => {
+                // We are looking for lines that define the metric, not comments or empty lines.
+                // A metric line doesn't start with '#' and is not empty.
+                const trimmedLine = line.trim();
+                if (trimmedLine && !trimmedLine.startsWith('#')) {
+                    // Extract the metric name which is the part before the first '{' or space.
+                    const metricName = trimmedLine.split(/[{ ]/)[0];
+                    if (metricName) {
+                        metricNames.add(metricName);
+                    }
+                }
+            });
+            
+            return metricNames;
+        }
+
+        // Function to render a list of metrics into a <ul> element
+        function renderList(elementId, list) {
+            const ul = document.getElementById(elementId);
+            ul.innerHTML = ''; // Clear previous results
+            if(list.length === 0){
+                 ul.innerHTML = '<li class="list-none text-gray-400">-- ไม่มี --</li>';
+            } else {
+                list.forEach(item => {
+                    const li = document.createElement('li');
+                    li.textContent = item;
+                    ul.appendChild(li);
+                });
+            }
+        }
+
+        document.getElementById('compareBtn').addEventListener('click', () => {
+            const beforeData = document.getElementById('beforeData').value;
+            const afterData = document.getElementById('afterData').value;
+            const resultsDiv = document.getElementById('results');
+            const loadingDiv = document.getElementById('loading');
+            const noDataMsg = document.getElementById('noDataMessage');
+
+            // Hide previous results and messages
+            resultsDiv.classList.add('hidden');
+            noDataMsg.classList.add('hidden');
+
+            if (!beforeData || !afterData) {
+                noDataMsg.classList.remove('hidden');
+                return;
+            }
+
+            loadingDiv.classList.remove('hidden');
+
+            // Process comparison in a timeout to allow the loading indicator to render
+            setTimeout(() => {
+                // Get unique metric names from both inputs
+                const metricsBefore = getMetricNames(beforeData);
+                const metricsAfter = getMetricNames(afterData);
+
+                // Convert sets to arrays for filtering and sorting
+                const metricsBeforeArray = Array.from(metricsBefore).sort();
+                const metricsAfterArray = Array.from(metricsAfter).sort();
+                
+                // Find differences and commonalities for comparison
+                const onlyInBefore = metricsBeforeArray.filter(m => !metricsAfter.has(m));
+                const onlyInAfter = metricsAfterArray.filter(m => !metricsBefore.has(m));
+                const commonMetrics = metricsBeforeArray.filter(m => metricsAfter.has(m));
+                
+                // Render the comparison lists
+                renderList('onlyInBeforeList', onlyInBefore);
+                renderList('onlyInAfterList', onlyInAfter);
+                renderList('commonMetricsList', commonMetrics);
+
+                // Render the full lists
+                renderList('allBeforeList', metricsBeforeArray);
+                renderList('allAfterList', metricsAfterArray);
+
+                // Show the results section
+                loadingDiv.classList.add('hidden');
+                resultsDiv.classList.remove('hidden');
+            }, 50); // Small delay
+        });
+    </script>
+</body>
+</html>
